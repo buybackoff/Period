@@ -21,18 +21,31 @@ the period with 1ms precision.
 Rationale
 =========
 
-63 bits are enough to store any practical time period in UTC. For time series, time zone info is a part of series definition. Storing TZ info in each
-time/period value is redundant (`DateTimeOffset` takes 12 bytes, 4 for offset). .NET/NodaTime allow easy convertion betwenn historical zoned time and UTC,
-but this only needed for data cleaning before data is persisted or for data presentation after data is processed. For analysis, all time should be in UTC.
+`DateTime` and `DateTimeOffset` are not blittable (they have `[StructLayout(LayoutKind.Auto)]`)! 
+This fact alone could be enough to use just ticks when working with arrays of dates and using native interop, 
+but the following arguments justify a new data structure with some convenient features in addition to sequential layout.
 
-Ticks precision is usually not needed, some bits could be used for period. Period info is needed in addition to start/end, e.g. to distinguish between 
-an hour and a minute started at the same tick. One could store data with different frequencies in separate tables, but in general the number of possible
-frequencies is not fixed and custom periods are possible. With ordered key-value storage (B+-trees, Cassandra, ESENT, LMDB, and event SQL with clustered 
-primary key/covering indexes) we could store data with Period keys very efficiently: all frequencies are phisically placed together and range
- queries are very fast. We could use a single table for all frequencies without big performance loss.
+63 bits are enough to store any practical time period in UTC. For time series,
+ time zone info is a part of series definition. Storing TZ info in each
+time/period value is redundant (`DateTimeOffset` takes 12 bytes, 4 for offset). 
+.NET/NodaTime allow easy convertion betwenn historical zoned time and UTC,
+but this only needed for data cleaning before data is persisted or for data 
+presentation after data is processed. For analysis, all time values should be in UTC.
 
-Bit layout of Period is optimized for compression. Difference between two adjacent period in representable as `1:Int32`, so any number of sequential Periods
-could be represented as the first period and the number of periods. In addition, with bit-shuffling libraries like Blosc diffing becomes less necessary
+Ticks precision is usually not needed, some bits could be used for period. 
+Period info is needed in addition to start/end, e.g. to distinguish between 
+an hour and a minute started at the same tick. One could store data with different 
+frequencies in separate tables, but, in general, the number of possible
+frequencies is not fixed and custom periods are possible. With ordered key-value storage 
+(B+-trees, Cassandra, ESENT, LMDB, and event SQL with clustered primary key/covering indexes) 
+we could store data with Period keys very efficiently: all frequencies are phisically placed
+ together and range  queries are very fast. We could use a single table for all 
+ frequencies without big performance loss.
+
+Bit layout of Period is optimized for compression. Difference between two
+ adjacent period in representable as `1:Int32`, so any number of sequential Periods
+could be represented as the first period and the number of periods. In addition, with 
+bit-shuffling libraries like Blosc diffing becomes less necessary
 and lexicographic bit layout helps to achieve very high compression.
 
 TODOs

@@ -1,3 +1,6 @@
+#### 0.1.1 - May 3 2015
+* Finalized (second time :) ) bit layout, added readme and picture. Still no tests, assume bugs and stupid errors are here.
+
 #### 0.1.0 - April 16 2015
 * Finalized bit layout, added readme and picture. Still no tests, assume bugs and stupid errors are here.
 
