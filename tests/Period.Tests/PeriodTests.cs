@@ -27,6 +27,8 @@ namespace QuikSharp.Tests {
 					var p = new Period.Period(unitPeriod, 1, DateTimeOffset.UtcNow.Date);
 					var next = p.Add(step);
 					var diff = next.Diff(p);
+					Assert.That(next.Previous, Is.EqualTo(p)); // failing
+					Assert.That(p.Next, Is.EqualTo(next));
 					Assert.That(next.Add(-step), Is.EqualTo(p));
 					Assert.That(diff, Is.EqualTo(step));
 				}
