@@ -111,7 +111,7 @@ module internal TimePeriodModule =
   
 
   let isTick (value) : bool = (tickFlagValue = (value >>> tickFlagOffset))
-  let markNotTick value = value ||| (1L <<< tickFlagOffset)
+  let markNotTick value = value ||| (nonTickFlagValue <<< tickFlagOffset)
 
   let getTicks (value) = 
     if isTick value then (value &&& ticksMask) >>> tickOffset
@@ -204,7 +204,7 @@ module internal TimePeriodModule =
     match unitPeriod with
       | UnitPeriod.Tick -> startDto.UtcTicks
       | _ ->
-        let mutable value : int64 = nonTickFlagValue <<< tickFlagOffset
+        let mutable value : int64 = markNotTick 0L // nonTickFlagValue <<< tickFlagOffset
         value <- value |> setUnitPeriod (int64 unitPeriod)
         value <- value |> setLength (int64 length)
         value <- value |> setStartDateTime startDto.UtcDateTime
@@ -321,7 +321,8 @@ open TimePeriodModule
 
 
 type Period with
-  member this.Period with get(): UnitPeriod * int = unitPeriod this.value, int <| length this.value
+  member this.UnitPeriod with get(): UnitPeriod = unitPeriod this.value
+  member this.Length with get(): int = int <| length this.value
   member this.Start with get(): DateTimeOffset = periodStart this.value
   member this.End with get() : DateTimeOffset = periodEnd this.value
   member this.TimeSpan with get() : TimeSpan = timeSpan this.value
@@ -336,7 +337,9 @@ type Period with
   static member op_Explicit(timePeriod:Period) : DateTime = timePeriod.Start.DateTime
 
 
-  static member (-) (tp1 : Period, tp2 : Period) : int64 = intDiff tp1.value tp2.value 
+  static member (-) (period1 : Period, period2 : Period) : int64 = intDiff period1.value period2.value 
+  static member (+) (period : Period, diff : int64) : Period = Period(addPeriods diff period.value)
+  static member (+) (diff : int64, period : Period) : Period = Period(addPeriods diff period.value)
 
   static member Hash(tp:Period) : Period = Period(bucketHash (tp.value) (unitPeriod (tp.value)))
 
