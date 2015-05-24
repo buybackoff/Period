@@ -1,4 +1,4 @@
-﻿namespace Spreads
+﻿namespace Period
 
 open System
 open System.Collections
@@ -63,6 +63,8 @@ module internal TimePeriodModule =
   [<Literal>]
   let tickFlagValue = 0L
   [<Literal>]
+  let nonTickFlagValue = 1L
+  [<Literal>]
   let zeroYear = 1 // 0001
 
   [<Literal>]
@@ -108,67 +110,69 @@ module internal TimePeriodModule =
   let unitPeriodMask = 4035225266123964416L // ((1L <<< 3) - 1L) <<< 59
   
 
-  let inline isTick (value) : bool = (tickFlagValue = (value >>> tickFlagOffset))
+  let isTick (value) : bool = (tickFlagValue = (value >>> tickFlagOffset))
+  let markNotTick value = value ||| (1L <<< tickFlagOffset)
 
-  let inline getTicks (value) = 
+  let getTicks (value) = 
     if isTick value then (value &&& ticksMask) >>> tickOffset
     else (value &&& msecMask) * ticksPerMillisecond
       
-  let inline setTicks ticks value = 
+  let setTicks ticks value = 
     if isTick value then (ticks <<< tickOffset) ||| (value &&& ~~~ticksMask)
     else 
       let msecs = ticks/ticksPerMillisecond
       (msecs <<< msecOffset) ||| (value &&& ~~~msecMask)
 
-  let inline getStartDateTime value : DateTime = 
+  let getStartDateTime value : DateTime = 
     DateTime(getTicks value, DateTimeKind.Utc)
 
-  let inline setStartDateTime (dt:DateTime) value : int64 =
+  let setStartDateTime (dt:DateTime) value : int64 =
     setTicks (dt.ToUniversalTime().Ticks) value
 
-  let inline getLength value = (value &&& lengthMask) >>> lengthOffset
-  let inline setLength length value = (length <<< lengthOffset) ||| (value &&& ~~~lengthMask)
+  let getLength value = (value &&& lengthMask) >>> lengthOffset
+  let setLength length value = (length <<< lengthOffset) ||| (value &&& ~~~lengthMask)
 
-  let inline getUnitPeriod (value:int64) : int64 = 
+  let getUnitPeriod (value:int64) : int64 = 
     if isTick value then (int64 UnitPeriod.Tick)
     else (value &&& unitPeriodMask) >>> unitPeriodOffset
-  let inline setUnitPeriod unitPeriod value = 
+  let setUnitPeriod unitPeriod value = 
     if isTick value then value
     else (unitPeriod <<< unitPeriodOffset) ||| (value &&& ~~~unitPeriodMask) 
 
-  let inline getPeriod value = (value &&& (lengthMask ||| unitPeriodMask )) >>> lengthOffset
-  let inline setPeriod period value = (period <<< lengthOffset) ||| (value &&& ~~~(lengthMask ||| unitPeriodMask ))
+  let getPeriod value = (value &&& (lengthMask ||| unitPeriodMask )) >>> lengthOffset
+  let setPeriod period value = (period <<< lengthOffset) ||| (value &&& ~~~(lengthMask ||| unitPeriodMask ))
 
 
 
-  let inline milliseconds (tpv:int64) : int64 = 
+  let milliseconds (tpv:int64) : int64 = 
     (getStartDateTime tpv).Millisecond |> int64
-  let inline seconds (tpv:int64) : int64 = 
+  let seconds (tpv:int64) : int64 = 
     (getStartDateTime tpv).Second |> int64
-  let inline minutes (tpv:int64) : int64 = 
+  let minutes (tpv:int64) : int64 = 
     (getStartDateTime tpv).Minute |> int64
-  let inline hours (tpv:int64) : int64 = 
+  let hours (tpv:int64) : int64 = 
     (getStartDateTime tpv).Hour |> int64
-  let inline days (tpv:int64) : int64 = 
+  let days (tpv:int64) : int64 = 
     (getStartDateTime tpv).Day |> int64
-  let inline months (tpv:int64) : int64 = 
+  let months (tpv:int64) : int64 = 
     (getStartDateTime tpv).Month |> int64
-  let inline years (tpv:int64) : int64 = 
+  let years (tpv:int64) : int64 = 
     (getStartDateTime tpv).Year |> int64
-  let inline length (tpv:int64) : int64 = 
+  let length (tpv:int64) : int64 = 
     Debug.Assert(not (isTick tpv))
     getLength(tpv)
-  let inline unitPeriod (tpv:int64) : UnitPeriod =
+  let unitPeriod (tpv:int64) : UnitPeriod =
     LanguagePrimitives.EnumOfValue <| int (getUnitPeriod tpv)
 
 
   /// Assume that inputs are not checked for logic
-  let inline ofPartsUnsafe // TODO make a copy of it ofPartsSafe with arg checks and use it in the ctors.
+  let ofPartsUnsafe // TODO make a copy of it ofPartsSafe with arg checks and use it in the ctors.
     (unitPeriod:UnitPeriod) (length:int) 
     (year:int) (month:int) (day:int) 
     (hour:int) (minute:int) (second:int) (millisecond:int) : int64 =
-      let startDtUtc = DateTime(year, month, day, 
-        hour, minute, second, millisecond, DateTimeKind.Utc)
+      let startDtUtc = 
+        DateTime(year, month, day, 
+                  hour, minute, second, millisecond, DateTimeKind.Utc)
       match unitPeriod with
       | UnitPeriod.Tick -> 
         // first two bits are zero, then just UTC ticks
@@ -183,7 +187,7 @@ module internal TimePeriodModule =
 
   /// Convert datetime to TimePeriod with Windows built-in time zone infos
   /// Windows updates TZ info with OS update patches, could also use NodaTime for this
-  let inline ofStartDateTimeWithZoneUnsafe (unitPeriod:UnitPeriod) (length:int)  (startDate:DateTime) (tzi:TimeZoneInfo) =
+  let ofStartDateTimeWithZoneUnsafe (unitPeriod:UnitPeriod) (length:int)  (startDate:DateTime) (tzi:TimeZoneInfo) =
     // number of 30 minutes intervals, with 24 = UTC/zero offset
     // TODO test with India
     let startDto =  DateTimeOffset(startDate,tzi.GetUtcOffset(startDate))
@@ -196,18 +200,18 @@ module internal TimePeriodModule =
         value <- value |> setStartDateTime startDto.UtcDateTime
         value
 
-  let inline ofStartDateTimeOffset (unitPeriod:UnitPeriod) (length:int)  (startDto:DateTimeOffset) =
+  let ofStartDateTimeOffset (unitPeriod:UnitPeriod) (length:int)  (startDto:DateTimeOffset) =
     match unitPeriod with
       | UnitPeriod.Tick -> startDto.UtcTicks
       | _ ->
-        let mutable value : int64 = 0L
+        let mutable value : int64 = nonTickFlagValue <<< tickFlagOffset
         value <- value |> setUnitPeriod (int64 unitPeriod)
         value <- value |> setLength (int64 length)
         value <- value |> setStartDateTime startDto.UtcDateTime
         value
             
 
-  let inline addPeriods (numPeriods:int64) (tpv:int64) : int64 =
+  let addPeriods (numPeriods:int64) (tpv:int64) : int64 =
     if numPeriods = 0L then tpv
     else
       let unit = unitPeriod tpv
@@ -232,18 +236,18 @@ module internal TimePeriodModule =
       | UnitPeriod.Eternity -> tpv
       | _ -> failwith "wrong unit period, never hit this"
 
-  let inline periodStart (tpv:int64) : DateTimeOffset =
+  let periodStart (tpv:int64) : DateTimeOffset =
     DateTimeOffset(getStartDateTime tpv)
 
   /// period end is the start of the next period, exclusive (epsilon to the start of the next period)
-  let inline periodEnd (tpv:int64) : DateTimeOffset =
+  let periodEnd (tpv:int64) : DateTimeOffset =
     // for ticks start and end are the same
     if isTick tpv then 
       DateTimeOffset(getTicks tpv, TimeSpan.Zero)
     else 
       periodStart (addPeriods 1L tpv)
 
-  let inline timeSpan (tpv:int64) : TimeSpan =
+  let timeSpan (tpv:int64) : TimeSpan =
     if isTick tpv then TimeSpan(1L)
     else TimeSpan((periodEnd tpv).Ticks - (periodStart tpv).Ticks)
 
@@ -323,7 +327,7 @@ type Period with
   member this.TimeSpan with get() : TimeSpan = timeSpan this.value
   member this.Next with get() : Period = Period(addPeriods 1L this.value)
   member this.Previous with get() : Period = Period(addPeriods -1L this.value)
-
+  member this.IsTick with get() : bool = isTick this.value
   /// This - other
   member this.Diff(other:Period) = intDiff this.value other.value
   member this.Add(diff:int64) = Period(addPeriods diff this.value)
@@ -401,3 +405,4 @@ type TimePeriodComparer() =
   member x.Compare(a:Period,b:Period) = a.value.CompareTo(b.value)
   interface IComparer<Period> with
     member x.Compare(a,b) = a.value.CompareTo(b.value)
+
