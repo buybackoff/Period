@@ -16,11 +16,10 @@ open System.Runtime.InteropServices
 //                      2015:Q - a quarter started at [the beginning of] 2015, same as 20150101:1Q
 // Colon divides [start]:[end], with offsets like 1Q or 7D applied to another part
 
-// Sequence of period could be preented as 20150101:D:2Q - daily data for the first two quarters of 2015
+// Sequence of period could be printed as 20150101:D:2Q - daily data for the first two quarters of 2015
 
 
-
-/// Base unit of TimePeriod
+/// Base unit of a period
 type UnitPeriod =
   | Tick = -1         //               100 nanosec
   // Unused zero value
@@ -33,30 +32,8 @@ type UnitPeriod =
   /// Static or constant
   | Eternity = 7      //                  Infinity
 
-#nowarn "9" // no overlap of fields here
-[<CustomComparison;CustomEquality;StructLayout(LayoutKind.Sequential)>]
-type Period =
-  struct
-    val internal value : int64
-    internal new(value:int64) = {value = value}
-  end
-  override x.Equals(yobj) =
-    match yobj with
-    | :? Period as y -> (x.value = y.value)
-    | _ -> false
-  override x.GetHashCode() = x.value.GetHashCode()
-  override x.ToString() = x.value.ToString()
-  interface System.IComparable<Period> with
-    member x.CompareTo y = x.value.CompareTo(y.value)
-  interface System.IComparable with
-    member x.CompareTo other = 
-      match other with
-      | :? Period as y -> x.value.CompareTo(y.value)
-      | _ -> invalidArg "other" "Cannot compare values of different types"
 
-  static member op_Explicit(value:int64) : Period =  Period(value)
-  static member op_Explicit(timePeriod:Period) : int64  = timePeriod.value
-  
+ 
 
 module internal TimePeriodModule =
 
@@ -123,11 +100,9 @@ module internal TimePeriodModule =
       let msecs = ticks/ticksPerMillisecond
       (msecs <<< msecOffset) ||| (value &&& ~~~msecMask)
 
-  let getStartDateTime value : DateTime = 
-    DateTime(getTicks value, DateTimeKind.Utc)
+  let inline getStartDateTime value : DateTime = DateTime(getTicks value, DateTimeKind.Utc)
 
-  let setStartDateTime (dt:DateTime) value : int64 =
-    setTicks (dt.ToUniversalTime().Ticks) value
+  let inline setStartDateTime (dt:DateTime) value : int64 = setTicks (dt.ToUniversalTime().Ticks) value
 
   let getLength value = (value &&& lengthMask) >>> lengthOffset
   let setLength length value = (length <<< lengthOffset) ||| (value &&& ~~~lengthMask)
@@ -210,6 +185,10 @@ module internal TimePeriodModule =
         value <- value |> setStartDateTime startDto.UtcDateTime
         value
             
+  let inline compare (first:int64) (second:int64) =
+    if getPeriod first = getPeriod second then first.CompareTo(second)
+    else (getTicks first).CompareTo(getTicks second)
+    // (getTicks first).CompareTo(getTicks second) // this is enough, try test only it
 
   let addPeriods (numPeriods:int64) (tpv:int64) : int64 =
     if numPeriods = 0L then tpv
@@ -316,13 +295,42 @@ module internal TimePeriodModule =
         (int64 <| (dt2.Year * 12 + dt2.Month) - (dt1.Year * 12 + dt1.Month)) / len1
 
 
-
 open TimePeriodModule
 
 
-type Period with
+
   member this.UnitPeriod with get(): UnitPeriod = unitPeriod this.value
   member this.Length with get(): int = int <| length this.value
+  inherit IComparable
+  /// IPeriod is compared by Start property
+  inherit IComparable<IPeriod>
+  /// Base unit of a period
+  abstract UnitPeriod : UnitPeriod with get
+  /// Length of the period as a number of UnitPeriods
+  abstract Length : int with get
+  /// Start of the period as UTC DateTime
+  abstract Start : DateTime with get
+
+
+
+#nowarn "9" // no overlap of fields here
+/// Optimized implementation of IPeriod interface
+[<CustomComparison;CustomEquality;StructLayout(LayoutKind.Sequential)>]
+type Period =
+  struct
+    val internal value : int64
+    internal new(value:int64) = {value = value}
+  end
+  override x.Equals(yobj) =
+    match yobj with
+    | :? Period as y -> (x.value = y.value)
+    | _ -> false
+  override x.GetHashCode() = x.value.GetHashCode()
+  override x.ToString() = x.value.ToString() // TODO pretty
+
+  static member op_Explicit(value:int64) : Period =  Period(value)
+  static member op_Explicit(timePeriod:Period) : int64  = timePeriod.value
+
   member this.Start with get(): DateTimeOffset = periodStart this.value
   member this.End with get() : DateTimeOffset = periodEnd this.value
   member this.TimeSpan with get() : TimeSpan = timeSpan this.value
@@ -342,6 +350,19 @@ type Period with
   static member (+) (diff : int64, period : Period) : Period = Period(addPeriods diff period.value)
 
   static member Hash(tp:Period) : Period = Period(bucketHash (tp.value) (unitPeriod (tp.value)))
+
+  interface IPeriod with
+    member x.CompareTo (y:IPeriod) = 
+      match y with
+      | :? Period as y -> compare x.value y.value
+      | _ -> invalidArg "other" "Cannot compare values of different types"
+    member x.CompareTo (other:obj) = 
+      match other with
+      | :? Period as y -> compare x.value y.value
+      | _ -> invalidArg "other" "Cannot compare values of different types"
+    member x.UnitPeriod: UnitPeriod = unitPeriod x.value
+    member x.Length: int = int <| length x.value
+    member x.Start: DateTime = (periodStart x.value).UtcDateTime
 
 
   /// Read this as "numberOfUnitPeriods unitPeriods started on startTime",
@@ -404,8 +425,4 @@ type Period with
     }
 
 
-type TimePeriodComparer() =
-  member x.Compare(a:Period,b:Period) = a.value.CompareTo(b.value)
-  interface IComparer<Period> with
-    member x.Compare(a,b) = a.value.CompareTo(b.value)
 
