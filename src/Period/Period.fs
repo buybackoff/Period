@@ -1,4 +1,4 @@
-﻿namespace Period
+﻿namespace Spreads
 
 open System
 open System.Collections
@@ -35,7 +35,7 @@ type UnitPeriod =
 
  
 
-module internal TimePeriodModule =
+module internal PeriodModule =
 
   [<Literal>]
   let tickFlagValue = 0L
@@ -78,23 +78,24 @@ module internal TimePeriodModule =
   let tickFlagOffset = 62
 
   [<Literal>]
-  let ticksMask = 4611686018427387903L // ((1L <<< 62) - 1L) <<< 0
+  let ticksMask = 4611686018427387903L // ((1L <<< 62) - 1L) <<< 0   // 00111111...11 62times
   [<Literal>]
   let msecMask = 562949953421311L // ((1L <<< 49)  - 1L) <<< 0
   [<Literal>]
   let lengthMask = 575897802350002176L // ((1L <<< 10) - 1L) <<< 49
   [<Literal>]
   let unitPeriodMask = 4035225266123964416L // ((1L <<< 3) - 1L) <<< 59
-  
+  [<Literal>]
+  let periodMask = 4611123068473966592L // lengthMask ||| unitPeriodMask
 
-  let isTick (value) : bool = (tickFlagValue = (value >>> tickFlagOffset))
+  let inline isTick (value) : bool = value < ticksMask //(tickFlagValue = (value >>> tickFlagOffset))
   let markNotTick value = value ||| (nonTickFlagValue <<< tickFlagOffset)
 
-  let getTicks (value) = 
+  let inline getTicks (value) = 
     if isTick value then (value &&& ticksMask) >>> tickOffset
     else (value &&& msecMask) * ticksPerMillisecond
       
-  let setTicks ticks value = 
+  let inline setTicks ticks value = 
     if isTick value then (ticks <<< tickOffset) ||| (value &&& ~~~ticksMask)
     else 
       let msecs = ticks/ticksPerMillisecond
@@ -104,18 +105,23 @@ module internal TimePeriodModule =
 
   let inline setStartDateTime (dt:DateTime) value : int64 = setTicks (dt.ToUniversalTime().Ticks) value
 
-  let getLength value = (value &&& lengthMask) >>> lengthOffset
-  let setLength length value = (length <<< lengthOffset) ||| (value &&& ~~~lengthMask)
+  let inline getLength value = (value &&& lengthMask) >>> lengthOffset
+  let inline setLength length value = (length <<< lengthOffset) ||| (value &&& ~~~lengthMask)
 
-  let getUnitPeriod (value:int64) : int64 = 
+  let inline getUnitPeriod (value:int64) : int64 = 
     if isTick value then (int64 UnitPeriod.Tick)
     else (value &&& unitPeriodMask) >>> unitPeriodOffset
-  let setUnitPeriod unitPeriod value = 
+  let inline setUnitPeriod unitPeriod value = 
     if isTick value then value
     else (unitPeriod <<< unitPeriodOffset) ||| (value &&& ~~~unitPeriodMask) 
 
-  let getPeriod value = (value &&& (lengthMask ||| unitPeriodMask )) >>> lengthOffset
-  let setPeriod period value = (period <<< lengthOffset) ||| (value &&& ~~~(lengthMask ||| unitPeriodMask ))
+  let inline getPeriod value = 
+    if isTick value then 0L
+    else (value &&& (periodMask)) >>> lengthOffset
+
+  let inline setPeriod period value = 
+    if isTick value then value
+    else (period <<< lengthOffset) ||| (value &&& ~~~(periodMask ))
 
 
 
@@ -162,10 +168,10 @@ module internal TimePeriodModule =
 
   /// Convert datetime to TimePeriod with Windows built-in time zone infos
   /// Windows updates TZ info with OS update patches, could also use NodaTime for this
-  let ofStartDateTimeWithZoneUnsafe (unitPeriod:UnitPeriod) (length:int)  (startDate:DateTime) (tzi:TimeZoneInfo) =
+  let ofStartDateTimeWithZoneUnsafe (unitPeriod:UnitPeriod) (length:int)  (startDate:DateTime) (tzi:TimeZoneInfo) : int64 =
     // number of 30 minutes intervals, with 24 = UTC/zero offset
     // TODO test with India
-    let startDto =  DateTimeOffset(startDate,tzi.GetUtcOffset(startDate))
+    let startDto =  DateTimeOffset(startDate,tzi.GetUtcOffset(startDate)) // throws when startDate and tzi do not match
     match unitPeriod with
       | UnitPeriod.Tick -> startDto.Ticks
       | _ ->
@@ -184,10 +190,14 @@ module internal TimePeriodModule =
         value <- value |> setLength (int64 length)
         value <- value |> setStartDateTime startDto.UtcDateTime
         value
-            
+          
+        
   let inline compare (first:int64) (second:int64) =
-    if getPeriod first = getPeriod second then first.CompareTo(second)
+    if ((first &&& (periodMask)) = (second &&& (periodMask)) ) || (isTick first && isTick second) then first.CompareTo(second)
     else (getTicks first).CompareTo(getTicks second)
+
+//    if isTick value then (value &&& ticksMask) >>> tickOffset
+//    else (value &&& msecMask) * ticksPerMillisecond
     // (getTicks first).CompareTo(getTicks second) // this is enough, try test only it
 
   let addPeriods (numPeriods:int64) (tpv:int64) : int64 =
@@ -223,7 +233,7 @@ module internal TimePeriodModule =
     // for ticks start and end are the same
     if isTick tpv then 
       DateTimeOffset(getTicks tpv, TimeSpan.Zero)
-    else 
+    else
       periodStart (addPeriods 1L tpv)
 
   let timeSpan (tpv:int64) : TimeSpan =
@@ -295,12 +305,9 @@ module internal TimePeriodModule =
         (int64 <| (dt2.Year * 12 + dt2.Month) - (dt1.Year * 12 + dt1.Month)) / len1
 
 
-open TimePeriodModule
+open PeriodModule
 
-
-
-  member this.UnitPeriod with get(): UnitPeriod = unitPeriod this.value
-  member this.Length with get(): int = int <| length this.value
+type IPeriod =
   inherit IComparable
   /// IPeriod is compared by Start property
   inherit IComparable<IPeriod>
@@ -340,7 +347,14 @@ type Period =
   /// This - other
   member this.Diff(other:Period) = intDiff this.value other.value
   member this.Add(diff:int64) = Period(addPeriods diff this.value)
-
+  member this.CompareTo (other:IPeriod) = 
+    match other with
+    | :? Period as y -> compare this.value y.value
+    | _ -> invalidArg "other" "Cannot compare values of different types"
+  member this.CompareTo (other:obj) = 
+    match other with
+    | :? Period as y -> compare this.value y.value
+    | _ -> invalidArg "other" "Cannot compare values of different types"
   static member op_Explicit(timePeriod:Period) : DateTimeOffset = timePeriod.Start
   static member op_Explicit(timePeriod:Period) : DateTime = timePeriod.Start.DateTime
 
@@ -348,12 +362,15 @@ type Period =
   static member (-) (period1 : Period, period2 : Period) : int64 = intDiff period1.value period2.value 
   static member (+) (period : Period, diff : int64) : Period = Period(addPeriods diff period.value)
   static member (+) (diff : int64, period : Period) : Period = Period(addPeriods diff period.value)
+  static member (<) (period1 : Period, period2 : Period) : bool = (compare period1.value period2.value) = -1
+  static member (>) (period1 : Period, period2 : Period) : bool = (compare period1.value period2.value) = 1
+
 
   static member Hash(tp:Period) : Period = Period(bucketHash (tp.value) (unitPeriod (tp.value)))
 
   interface IPeriod with
-    member x.CompareTo (y:IPeriod) = 
-      match y with
+    member x.CompareTo (other:IPeriod) = 
+      match other with
       | :? Period as y -> compare x.value y.value
       | _ -> invalidArg "other" "Cannot compare values of different types"
     member x.CompareTo (other:obj) = 
