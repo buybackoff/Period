@@ -1,4 +1,12 @@
-﻿Period
+﻿Status
+==========
+Experiments. Tests show that custom comparison is very slow, binary search suffers a lot. This structure could be useful as DTO, but not as a key 
+for SortedList or similar structure when one need to compare by StartDate and not by internal int64 value.
+
+...
+
+
+Period
 ==========
 
 Store any time period as 64-bit integer. Optimized for speed, space, compression and sorted storage like B+ trees.
