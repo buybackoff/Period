@@ -365,6 +365,8 @@ type Period =
   static member (<) (period1 : Period, period2 : Period) : bool = (compare period1.value period2.value) = -1
   static member (>) (period1 : Period, period2 : Period) : bool = (compare period1.value period2.value) = 1
 
+  static member ConvertToUTC(datetime:DateTime, originalTimeZone:TimeZoneInfo) =
+    DateTimeOffset(datetime,originalTimeZone.GetUtcOffset(datetime)).ToUniversalTime().DateTime // Kind.Unspecified
 
   static member Hash(tp:Period) : Period = Period(bucketHash (tp.value) (unitPeriod (tp.value)))
 
